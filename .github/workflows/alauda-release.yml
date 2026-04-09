@@ -1,0 +1,195 @@
+# Licensed to the Apache Software Foundation (ASF) under one
+# or more contributor license agreements.  See the NOTICE file
+# distributed with this work for additional information
+# regarding copyright ownership.  The ASF licenses this file
+# to you under the Apache License, Version 2.0 (the
+# "License"); you may not use this file except in compliance
+# with the License.  You may obtain a copy of the License at
+#
+#       http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing,
+# software distributed under the License is distributed on an
+# "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+# KIND, either express or implied.  See the License for the
+# specific language governing permissions and limitations
+# under the License.
+
+name: Alauda Derivative Release
+
+on:
+  push:
+    tags:
+      - "v*-alauda-*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Tag to release (format: vX.Y.Z-alauda-N)"
+        required: true
+        type: string
+
+concurrency:
+  group: alauda-derivative-release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve release metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            RELEASE_TAG="${{ inputs.tag }}"
+          else
+            RELEASE_TAG="${GITHUB_REF_NAME}"
+          fi
+
+          if [[ ! "${RELEASE_TAG}" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-alauda-([0-9]+)$ ]]; then
+            echo "::error::Tag ${RELEASE_TAG} does not match vX.Y.Z-alauda-N."
+            exit 1
+          fi
+
+          BASE_VERSION="${BASH_REMATCH[1]}"
+          ALAUDA_REVISION="${BASH_REMATCH[2]}"
+          RELEASE_BRANCH="alauda-v${BASE_VERSION}"
+          DIST_NAME="apache-maven-${RELEASE_TAG}"
+
+          {
+            echo "release_tag=${RELEASE_TAG}"
+            echo "base_version=${BASE_VERSION}"
+            echo "alauda_revision=${ALAUDA_REVISION}"
+            echo "release_branch=${RELEASE_BRANCH}"
+            echo "dist_name=${DIST_NAME}"
+          } >> "${GITHUB_OUTPUT}"
+
+      - name: Checkout source
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ github.event_name == 'workflow_dispatch' && format('refs/tags/{0}', inputs.tag) || github.ref }}
+
+      - name: Validate mapped branch for this tag
+        id: branch_guard
+        shell: bash
+        env:
+          RELEASE_BRANCH: ${{ steps.meta.outputs.release_branch }}
+        run: |
+          set -euo pipefail
+
+          git fetch --no-tags origin "refs/heads/${RELEASE_BRANCH}:refs/remotes/origin/${RELEASE_BRANCH}" || true
+          if ! git show-ref --verify --quiet "refs/remotes/origin/${RELEASE_BRANCH}"; then
+            echo "::error::Expected branch ${RELEASE_BRANCH} does not exist on origin."
+            exit 1
+          fi
+
+          RELEASE_SHA="$(git rev-parse HEAD)"
+          if ! git merge-base --is-ancestor "${RELEASE_SHA}" "refs/remotes/origin/${RELEASE_BRANCH}"; then
+            echo "::error::Tag commit ${RELEASE_SHA} is not contained in ${RELEASE_BRANCH}."
+            exit 1
+          fi
+
+          echo "release_sha=${RELEASE_SHA}" >> "${GITHUB_OUTPUT}"
+
+      - name: Set up JDK
+        uses: actions/setup-java@be666c2fcd27ec809703dec50e508c2fdc7f6654 # v5.2.0
+        with:
+          java-version: "21"
+          distribution: "zulu"
+          cache: "maven"
+
+      - name: Ensure Maven bootstrap exists
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! command -v mvn >/dev/null 2>&1; then
+            sudo apt-get update
+            sudo apt-get install --no-install-recommends -y maven
+          fi
+
+      - name: Set up Maven Wrapper
+        shell: bash
+        run: mvn --errors --batch-mode --show-version org.apache.maven.plugins:maven-wrapper-plugin:3.3.4:wrapper "-Dmaven=3.9.14"
+
+      - name: Build derivative distribution
+        shell: bash
+        env:
+          DIST_NAME: ${{ steps.meta.outputs.dist_name }}
+        run: |
+          set -euo pipefail
+          ./mvnw -e -B -V -DskipTests -Papache-release -DdistributionFileName="${DIST_NAME}" package
+
+      - name: Collect release artifacts
+        id: collect
+        shell: bash
+        env:
+          DIST_NAME: ${{ steps.meta.outputs.dist_name }}
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+
+          cp "apache-maven/target/${DIST_NAME}-bin.tar.gz" dist/
+          cp "apache-maven/target/${DIST_NAME}-bin.zip" dist/
+          cp "apache-maven/target/${DIST_NAME}-src.tar.gz" dist/
+          cp "apache-maven/target/${DIST_NAME}-src.zip" dist/
+
+          for artifact in dist/*.tar.gz dist/*.zip; do
+            sha512sum "${artifact}" > "${artifact}.sha512"
+          done
+
+          ls -lah dist
+
+      - name: Build release notes with compliance statement
+        shell: bash
+        env:
+          RELEASE_TAG: ${{ steps.meta.outputs.release_tag }}
+          BASE_VERSION: ${{ steps.meta.outputs.base_version }}
+          RELEASE_BRANCH: ${{ steps.meta.outputs.release_branch }}
+          RELEASE_SHA: ${{ steps.branch_guard.outputs.release_sha }}
+        run: |
+          set -euo pipefail
+          cat > dist/RELEASE_NOTES.md <<EOF
+# ${RELEASE_TAG}
+
+## Alauda Compliance Statement
+
+- This release is a derivative build maintained by Alauda and is **not** an official release of the Apache Software Foundation (ASF).
+- Upstream baseline: Apache Maven \`maven-${BASE_VERSION}\`.
+- Source branch for this derivative line: \`${RELEASE_BRANCH}\`.
+- Release commit: \`${RELEASE_SHA}\`.
+- Project source in this fork remains under Apache License 2.0, with required NOTICE and attribution retained.
+- Apache and Apache Maven are trademarks of the ASF. This release name does not imply ASF endorsement.
+
+See repository-level derivative notice:
+https://github.com/${GITHUB_REPOSITORY}/blob/${RELEASE_BRANCH}/ALAUDA_DERIVATIVE_NOTICE.md
+EOF
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ${{ steps.meta.outputs.release_tag }}-artifacts
+          path: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha512
+            dist/RELEASE_NOTES.md
+
+      - name: Publish GitHub release
+        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
+        with:
+          tag_name: ${{ steps.meta.outputs.release_tag }}
+          target_commitish: ${{ steps.branch_guard.outputs.release_sha }}
+          name: ${{ steps.meta.outputs.release_tag }}
+          body_path: dist/RELEASE_NOTES.md
+          fail_on_unmatched_files: true
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/*.sha512
