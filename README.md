@@ -30,6 +30,11 @@ Apache Maven is a software project management and comprehension tool. Based on
 the concept of a project object model (POM), Maven can manage a project's
 build, reporting and documentation from a central piece of information.
 
+Alauda Derivative Releases
+--------------------------
+This fork also maintains derivative release lines and tags for Alauda-specific distribution.
+See [ALAUDA_DERIVATIVE_NOTICE.md](ALAUDA_DERIVATIVE_NOTICE.md) for compliance and naming policy.
+
 If you think you have found a bug, please file an issue in the [Maven Issue Tracker](https://github.com/apache/maven/issues).
 
 Documentation
@@ -90,4 +95,3 @@ mvn -DdistributionTargetDir="$HOME/app/maven/apache-maven-3.9.x-SNAPSHOT" clean 
 [core-it]: https://maven.apache.org/core-its/core-it-suite/
 [building-maven]: https://maven.apache.org/guides/development/guide-building-maven.html
 [cla]: https://www.apache.org/licenses/#clas
-
