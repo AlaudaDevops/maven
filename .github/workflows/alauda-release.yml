@@ -143,21 +143,21 @@ jobs:
           RELEASE_SHA: ${{ steps.branch_guard.outputs.release_sha }}
         run: |
           set -euo pipefail
-          cat > dist/RELEASE_NOTES.md <<EOF
-# ${RELEASE_TAG}
-
-## Alauda Compliance Statement
-
-- This release is a derivative build maintained by Alauda and is **not** an official release of the Apache Software Foundation (ASF).
-- Upstream baseline: Apache Maven \`maven-${BASE_VERSION}\`.
-- Source branch for this derivative line: \`${RELEASE_BRANCH}\`.
-- Release commit: \`${RELEASE_SHA}\`.
-- Project source in this fork remains under Apache License 2.0, with required NOTICE and attribution retained.
-- Apache and Apache Maven are trademarks of the ASF. This release name does not imply ASF endorsement.
-
-See repository-level derivative notice:
-https://github.com/${GITHUB_REPOSITORY}/blob/${RELEASE_BRANCH}/ALAUDA_DERIVATIVE_NOTICE.md
-EOF
+          {
+            echo "# ${RELEASE_TAG}"
+            echo
+            echo "## Alauda Compliance Statement"
+            echo
+            echo "- This release is a derivative build maintained by Alauda and is **not** an official release of the Apache Software Foundation (ASF)."
+            echo "- Upstream baseline: Apache Maven \`maven-${BASE_VERSION}\`."
+            echo "- Source branch for this derivative line: \`${RELEASE_BRANCH}\`."
+            echo "- Release commit: \`${RELEASE_SHA}\`."
+            echo "- Project source in this fork remains under Apache License 2.0, with required NOTICE and attribution retained."
+            echo "- Apache and Apache Maven are trademarks of the ASF. This release name does not imply ASF endorsement."
+            echo
+            echo "See repository-level derivative notice:"
+            echo "https://github.com/${GITHUB_REPOSITORY}/blob/${RELEASE_BRANCH}/ALAUDA_DERIVATIVE_NOTICE.md"
+          } > dist/RELEASE_NOTES.md
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
